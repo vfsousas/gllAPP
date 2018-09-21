@@ -1,0 +1,117 @@
+$path    = "server/php/files/".session_id();
+	chmod($path, 0777);
+	
+	foreach (new DirectoryIterator($path) as $file) {
+		if ($file->isFile()) {
+			print $file->getFilename() . "\n";
+			$fileName = strtolower($file->getFilename());
+			if(strpos($fileName, ".xls")){
+				$objPHPExcel =  PHPExcel_IOFactory::load($path."/".$fileName);
+				$inputFileType = 'Excel5';
+				/**  Create a new Reader of the type defined in $inputFileType  **/
+				$objReader = PHPExcel_IOFactory::createReader($inputFileType);
+				/**  Advise the Reader of which WorkSheets we want to load  **/
+				$objReader->setLoadSheetsOnly("Sheet1");
+				$GLOBALS['xlfile'] = $fileName;
+				//  Get worksheet dimensions
+				$sheet = $objPHPExcel->getSheet(0);
+				$highestRow = $sheet->getHighestRow();
+				$highestColumn = $sheet->getHighestColumn();
+				//  Loop through each row of the worksheet in turn
+				$insert = "";
+				$if_msg = "";
+				$query_trigger = "";
+				$valid = "";
+				$arr = "";
+				for ($row = 2; $row <= $highestRow-1; $row++){
+					//  Read a row of data into an array
+					$field_name = $sheet->rangeToArray('A' . $row . ':' . $highestColumn . $row,
+							NULL,
+							TRUE,
+							FALSE);
+
+					$type_value = $sheet->rangeToArray('B' . $row . ':' . $highestColumn . $row,
+							NULL,
+							TRUE,
+							FALSE);
+					$valid_values = $sheet->rangeToArray('C' . $row . ':' . $highestColumn . $row,
+							NULL,
+							TRUE,
+							FALSE);
+					$mandatory = $sheet->rangeToArray('D' . $row . ':' . $highestColumn . $row,
+							NULL,
+							TRUE,
+							FALSE);
+
+					$field = strval($field_name[0][0]);
+					$type = strtolower($type_value[0][0]);
+					$type = str_replace("number", "int", $type);
+					$type = str_replace("varchar2", "varchar", $type);
+					if($mandatory[0][0]=="Y"){
+						$mandatoryRes = " NOT NULL";			
+					}else{
+						$mandatoryRes = " NULL";			
+					}
+					$valid = "";
+					if($valid_values[0][0]!=""){
+						$valid_value = str_replace(";", ",", $valid_values[0][0]);
+						$arr = explode(",", $valid_value);				
+						foreach ($arr as $value) {
+							$valid .= "'".$value."',";
+						}	
+						$valid .= ")";
+						$valid =  str_replace(",)", "", $valid);
+
+						$if_msg .= "if (new.$field not in (".$valid.")) then"; 
+						$valid = str_replace(",", " OR ", $valid);
+						$valid = str_replace("'", "", $valid);		
+						$if_msg .= " SET @msg_txt = concat('In the field $field  was expected ".str_replace(",", " OR ", $valid).", and was found ', new.$field);
+								INSERT INTO gll_automation.".$_GET['username']."_".$GLOBALS['nowtime']."_errors_results (`ID`,`filename`, `row`, `issue`) VALUES (NULL, '".$GLOBALS['tablename']."' ,new.ID, @msg_txt);
+							end if;";
+					}
+						$insert .= $field ." ".$type." ".$mandatoryRes.",";							
+					//  Insert row data array into your database of choice here
+				}
+		
+
+			
+				$insert ="ID int(11), ". $insert .")";
+				$insert = str_replace(",)", "", $insert);
+				$xlsTableName = $fileName;
+				$xlsTableName = str_replace(".xls", "", $xlsTableName);
+				$query = "CREATE TABLE gll_automation.".$_GET['username']."_".$GLOBALS['nowtime']."_xls_".$xlsTableName."( ".$insert.")";	
+				$GLOBALS['xlstable']=$xlsTableName;
+
+				if(!mysqli_query($GLOBALS['con'], $query)){
+					die('XLSTBALENAME fatal error'.mysqli_error($GLOBALS['con']));
+				}
+				
+				if($if_msg<>""){
+					
+				if(!mysqli_query($GLOBALS['con'], "use gll_automation")){
+							
+							die('8)fatal error'.mysqli_error($GLOBALS['con']));
+				}
+				
+					$clear_trigger = "DROP TRIGGER IF EXISTS 'gll_automation.".$_GET['username']."_".$GLOBALS['nowtime']."_".$xlsTableName."'";
+					//echo $clear_trigger;
+					//if(!mysqli_query($con, $clear_trigger)){
+					//		die('fatal error'.mysqli_error($con));
+					//}
+				
+					$query_trigger = "create trigger gll_automation".$_GET['username']."_".$GLOBALS['nowtime']."_xls_".$xlsTableName." before insert on ".$_GET['username']."_".$GLOBALS['nowtime']."_xls_".$xlsTableName." 
+									   for each row 
+										 begin
+											$if_msg
+										end";
+					//echo $query_trigger."<BR><BR>";
+					if(!mysqli_query($GLOBALS['con'], $query_trigger)){
+							echo $query_trigger;
+							die('9) fatal error'.mysqli_error($GLOBALS['con']));
+					}
+				
+				}	
+							
+						}
+					}
+	}
